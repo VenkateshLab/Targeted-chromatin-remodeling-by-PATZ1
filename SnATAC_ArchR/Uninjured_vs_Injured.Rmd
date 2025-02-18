@@ -1,0 +1,521 @@
+---
+title: "ArchR_16_July_2024"
+author: "Manoj"
+date: "2024-07-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ArchR)
+```
+
+```{r}
+addArchRThreads(threads = 30) 
+```
+
+```{r}
+addArchRGenome("mm10")
+```
+
+```{r}
+# Define input file paths
+inputFiles <- c("Uninjured/fragments.tsv.gz","7dpi/fragments.tsv.gz")
+
+# Define sample names corresponding to each file
+sampleNames <- c("Uninjured","Injured_7dpi")
+```
+
+```{r}
+# Create Arrow files with updated arguments
+ArrowFiles <- createArrowFiles(
+    inputFiles = inputFiles,
+    sampleNames = sampleNames,
+    minTSS = 4,  # Updated argument name
+    minFrags = 1000,  # Updated argument name
+    addTileMat = TRUE,
+    addGeneScoreMat = TRUE,threads = 30
+)
+```
+
+```{r}
+doubScores <- addDoubletScores(
+  input = ArrowFiles,
+  k = 10, #Refers to how many cells near a "pseudo-doublet" to count.
+  knnMethod = "UMAP", #Refers to the embedding to use for nearest neighbor search.
+  LSIMethod = 1
+)
+```
+
+```{r}
+proj <- ArchRProject(
+  ArrowFiles = ArrowFiles, 
+  outputDirectory = "Uninjured_vs_Injured7dpi_1000_4",
+  copyArrows = F #This is recommended so that you maintain an unaltered copy for later usage.
+)
+```
+
+```{r}
+cellData <- getCellColData(ArchRProj = proj)
+numNuclei <- nrow(cellData)
+print(paste("Number of nuclei in the Arrow file:", numNuclei))
+```
+
+```{r}
+head(proj$cellNames)
+quantile(proj$TSSEnrichment)
+```
+
+```{r}
+df <- getCellColData(proj, select = c("log10(nFrags)", "TSSEnrichment"))
+df
+```
+
+```{r,fig.height=4,fig.width=4,fig.dpi=300}
+library(viridis)
+p <- ggPoint(
+    x = df[,1], 
+    y = df[,2], 
+    colorDensity = TRUE,
+    continuousSet = "sambaNight",
+    xlabel = "Log10 Unique Fragments",
+    ylabel = "TSS Enrichment",
+    xlim = c(1.8, 6),
+    ylim = c(0, 60)
+) + geom_hline(yintercept = 4, lty = "dashed") + geom_vline(xintercept = 3, lty = "dashed") +
+    #scale_color_viridis_c() +
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    legend.title = element_text(size = 16, face = "bold", margin = margin(b = 10))
+)
+p
+```
+
+
+
+```{r,fig.height=4,fig.width=6,fig.dpi=300}
+p3 <- plotFragmentSizes(ArchRProj = proj)+ theme_classic()+
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    legend.title = element_text(size = 16)
+)
+p3
+```
+
+
+
+```{r}
+ggsave("Uninjured_vs_Injured7dpi_1000_4/QC_fragments_metrics.png", plot = p, width = 5, height = 5, dpi = 300, device = "png")
+
+
+ggsave("Uninjured_vs_Injured7dpi_1000_4/QC_FragmentSizes_metrics.png", plot = p3, width = 7, height = 4, dpi = 300, device = "png")
+
+```
+
+
+```{r}
+#saveArchRProject(ArchRProj = proj, outputDirectory = "Uninjured_vs_Injured7dpi_1000_4", load = FALSE)
+```
+
+```{r}
+getAvailableMatrices(proj)
+```
+
+```{r}
+proj <- filterDoublets(ArchRProj = proj)
+```
+
+```{r}
+cellData <- getCellColData(ArchRProj = proj)
+numNuclei <- nrow(cellData)
+print(paste("Number of nuclei in the Arrow file:", numNuclei))
+```
+
+```{r}
+proj <- addIterativeLSI(
+  ArchRProj = proj, 
+  useMatrix = "TileMatrix", 
+  name = "IterativeLSI",
+  force = TRUE,
+  iterations = 4, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.2), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 25000, 
+    dimsToUse = 1:30)
+```
+
+
+```{r}
+proj <- addHarmony(
+    ArchRProj = proj,
+    reducedDims = "IterativeLSI",
+    name = "control",
+    groupBy = "Sample"
+)
+```
+
+```{r}
+proj <- addClusters(input = proj, reducedDims = "IterativeLSI",method="Seurat",name = "Clusters",resolution=0.8)
+proj <- addUMAP(ArchRProj = proj, reducedDims = "IterativeLSI")
+```
+
+
+
+
+
+
+
+
+
+```{r}
+p5 <- plotEmbedding(ArchRProj = proj, colorBy = "cellColData", name = "Sample", embedding = "UMAP")
+p6 <- plotEmbedding(ArchRProj = proj, colorBy = "cellColData", name = "Clusters", embedding = "UMAP")
+p5
+p6
+```
+
+```{r}
+#ggsave("p1_all.pdf", plot = p1, width = 5, height = 5,dpi = 300, units = "in")
+ggsave("Uninjured_vs_Injured7dpi_1000_4/Uninjured_vs_Injured7dpi_sample_cluster.png", plot = p5, width = 5, height = 5, dpi = 300, device = "png")
+# Save p2
+#ggsave("p2_all.pdf", plot = p2, width = 5, height = 5,dpi = 300,units = "in")
+ggsave("Uninjured_vs_Injured7dpi_1000_4/Uninjured_vs_Injured7dpi_orginal_cluster.png", plot = p6, width = 5, height = 5, dpi = 300, device = "png")
+```
+
+
+
+
+```{r}
+cellClusters <- getCellColData(proj, select = "Clusters")
+head(cellClusters)
+```
+
+```{r}
+table(proj$Clusters)
+```
+
+
+```{r}
+table(proj$Clusters)
+```
+
+```{r}
+cM <- confusionMatrix(proj$Clusters,proj$Clusters)
+```
+
+```{r}
+markersGS <- getMarkerFeatures(
+    ArchRProj = proj, 
+    useMatrix = "GeneScoreMatrix", 
+    groupBy = "Sample",
+    bias = c("TSSEnrichment", "log10(nFrags)"),
+    testMethod = "wilcoxon"
+)
+```
+
+```{r}
+markerList <- getMarkers(markersGS, cutOff = "FDR <= 0.01 & Log2FC >= 1")
+write.csv(markerList,"Uninjured_vs_Injured7dpi_1000_4/Uninjured_vs_Injured7dpi_marker_gene_Sample.csv")
+```
+
+```{r}
+proj2 <- addGroupCoverages(ArchRProj = proj, groupBy = "Sample")
+```
+
+```{r}
+pathToMacs2 <- "/home/manoj/anaconda3/bin/macs2"
+```
+
+```{r}
+projHeme3 <- addReproduciblePeakSet(
+    ArchRProj = proj2, 
+    groupBy = "Sample", 
+    pathToMacs2 = pathToMacs2,
+    threads = 30
+)
+```
+
+```{r}
+peak_set <- getPeakSet(projHeme3)
+peak_set
+```
+
+
+```{r}
+getPeakSet(projHeme3)
+```
+```{r}
+proj4 <- addReproduciblePeakSet(
+    ArchRProj = proj2, 
+    groupBy = "Sample",
+    peakMethod = "Tiles", 
+    method = "p"
+)
+```
+
+```{r}
+getPeakSet(proj4)
+```
+
+ 
+
+```{r}
+peak_list=getPeakSet(proj4)
+write.csv(peak_list,"Uninjured_vs_Injured7dpi_1000_4/Peak_List_Only_CST.csv",row.names = F)
+```
+```{r}
+group_counts <- table(peak_list$Group)
+print(group_counts)
+```
+
+
+```{r}
+# Load the data
+peak_list_data <- read.csv("Uninjured_vs_Injured7dpi_1000_4/Peak_List_Only_CST.csv")
+# Define the function to count peak types
+count_peak_types <- function(group_name) {
+  group_data <- peak_list_data[peak_list_data$Group == group_name, ]
+  peak_type_counts <- table(group_data$peakType)
+  return(peak_type_counts)
+}
+# Get counts for Injured_7dpi
+injured_7dpi_counts <- count_peak_types("Injured_7dpi")
+# Get counts for Uninjured
+uninjured_counts <- count_peak_types("Uninjured")
+# Print the results
+print("Peak Type Counts for Injured_7dpi")
+print(injured_7dpi_counts)
+print("Peak Type Counts for Uninjured")
+print(uninjured_counts)
+```
+```{r}
+proj5 <- addPeakMatrix(proj4)
+```
+```{r}
+getAvailableMatrices(proj5)
+```
+```{r}
+table(proj5$Sample)
+```
+```{r}
+markersPeaks <- getMarkerFeatures(
+    ArchRProj = proj5,
+    useMatrix = "PeakMatrix",
+    groupBy = "Sample",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  testMethod = "wilcoxon"
+)
+```
+```{r}
+markerTest <- getMarkerFeatures(
+  ArchRProj = proj5,
+  useMatrix = "PeakMatrix",
+  groupBy = "Sample",
+  testMethod = "wilcoxon",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  useGroups = "Uninjured",
+  bgdGroups = "Injured_7dpi"
+)
+```
+```{r}
+pma <- plotMarkers(seMarker = markerTest, name = "Uninjured", cutOff = "Pval <= 0.05 & abs(Log2FC) >= 0.5", plotAs = "MA")
+pma
+```
+
+
+```{r}
+Injured=getMarkerFeatures(
+  ArchRProj = proj5,
+  useMatrix = "PeakMatrix",
+  groupBy = "Sample",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  testMethod = "wilcoxon",
+ useGroups = "Injured_7dpi",
+  bgdGroups = "Uninjured")
+```
+
+```{r}
+heatmapPeaks <- plotMarkerHeatmap(
+  seMarker = Injured,
+  cutOff = "Pval<= 0.05 & Log2FC >= 0.5",
+  #labelMarkers = markerGenes,
+  transpose = TRUE,plotLog2FC = T
+)
+ComplexHeatmap::draw(heatmapPeaks, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+```
+
+
+```{r}
+Uninjured=getMarkerFeatures(
+  ArchRProj = proj5,
+  useMatrix = "PeakMatrix",
+  groupBy = "Sample",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  testMethod = "wilcoxon",
+ useGroups = "Uninjured",
+  bgdGroups = "Injured_7dpi")
+```
+
+```{r}
+heatmapPeaks <- plotMarkerHeatmap(
+  seMarker = Uninjured,
+  cutOff = "Pval<= 0.05 & Log2FC >= 0.5",
+  #labelMarkers = markerGenes,
+  transpose = TRUE,plotLog2FC = T
+)
+ComplexHeatmap::draw(heatmapPeaks, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+```
+
+```{r}
+# Load necessary library
+library(SummarizedExperiment)
+# Extract necessary data from elementMetadata
+element_metadata <- elementMetadata(Uninjured)
+seqnames <- as.character(element_metadata$seqnames)
+start <- element_metadata$start
+end <- element_metadata$end
+# Extract assay data
+log2FC <- Uninjured@assays@data@listData$Log2FC$x
+mean <- Uninjured@assays@data@listData$Mean$x
+fdr <- Uninjured@assays@data@listData$FDR$x
+pval <- Uninjured@assays@data@listData$Pval$x
+meanDiff <- Uninjured@assays@data@listData$MeanDiff$x
+auc <- Uninjured@assays@data@listData$AUC$x
+meanBGD <- Uninjured@assays@data@listData$MeanBGD$x
+# Check the length of extracted data to ensure they are consistent
+lengths <- sapply(list(seqnames, start, end, log2FC, mean, fdr, pval, meanDiff, auc, meanBGD), length)
+names(lengths) <- c("seqnames", "start", "end", "log2FC", "mean", "fdr", "pval", "meanDiff", "auc", "meanBGD")
+print(lengths)
+# Combine extracted values into a data frame
+if (all(lengths == lengths[1])) {
+  peak_data <- data.frame(
+    seqnames = seqnames,
+    start = start,
+    end = end,
+    Log2FC = log2FC,
+    Mean = mean,
+    FDR = fdr,
+    Pval = pval,
+    MeanDiff = meanDiff,
+    AUC = auc,
+    MeanBGD = meanBGD
+  )
+  # Write the data frame to a CSV file
+  write.csv(peak_data, "Peak_Matrix_Pairwise_Uninjured_vs_Injured.csv", row.names = FALSE)
+} else {
+  stop("The lengths of the extracted data do not match.")
+}
+```
+
+```{r}
+# Load libraries
+library(ChIPseeker)
+library(GenomicRanges)
+library(org.Mm.eg.db)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+# Load your data
+peak_data <- read.csv("Peak_Matrix_Pairwise_Uninjured_vs_Injured.csv")
+# Rename columns to avoid conflicts
+colnames(peak_data)[which(colnames(peak_data) %in% c("seqnames", "start", "end"))] <- c("chrom", "chromStart", "chromEnd")
+# Create a GRanges object
+gr <- GRanges(seqnames = Rle(peak_data$chrom),
+              ranges = IRanges(start = peak_data$chromStart, end = peak_data$chromEnd),
+              strand = Rle("*"),
+              peak_data[, -c(1:3)]) # Include all other columns
+# Annotate peaks
+txdb = TxDb.Mmusculus.UCSC.mm10.knownGene # Change to appropriate TxDb if needed
+peak_annotation = annotatePeak(gr, TxDb = txdb, annoDb = "org.Mm.eg.db")
+# Convert the annotation result to a data frame
+annotated_df = as.data.frame(peak_annotation)
+# Merge the annotation with the original peak data
+annotated_full_df <- cbind(peak_data, annotated_df[, !(colnames(annotated_df) %in% colnames(peak_data))])
+selected_columns <- c("chrom", "chromStart", "chromEnd","Log2FC", "Mean","FDR","Pval","AUC","MeanDiff","MeanBGD","width", "annotation", "geneLength", "distanceToTSS", "SYMBOL")
+final_df <- annotated_full_df[, selected_columns]
+# Save the annotated data to a new CSV file
+write.csv(final_df, "Peak_Matrix_Pairwise_Uninjured_vs_Injured_Annotated.csv",row.names = F)
+```
+
+```{r}
+# Load necessary library
+library(SummarizedExperiment)
+# Extract necessary data from elementMetadata
+element_metadata <- elementMetadata(Injured)
+seqnames <- as.character(element_metadata$seqnames)
+start <- element_metadata$start
+end <- element_metadata$end
+# Extract assay data
+log2FC <- Injured@assays@data@listData$Log2FC$x
+mean <- Injured@assays@data@listData$Mean$x
+fdr <- Injured@assays@data@listData$FDR$x
+pval <- Injured@assays@data@listData$Pval$x
+meanDiff <- Injured@assays@data@listData$MeanDiff$x
+auc <- Injured@assays@data@listData$AUC$x
+meanBGD <- Injured@assays@data@listData$MeanBGD$x
+# Check the length of extracted data to ensure they are consistent
+lengths <- sapply(list(seqnames, start, end, log2FC, mean, fdr, pval, meanDiff, auc, meanBGD), length)
+names(lengths) <- c("seqnames", "start", "end", "log2FC", "mean", "fdr", "pval", "meanDiff", "auc", "meanBGD")
+print(lengths)
+# Combine extracted values into a data frame
+if (all(lengths == lengths[1])) {
+  peak_data <- data.frame(
+    seqnames = seqnames,
+    start = start,
+    end = end,
+    Log2FC = log2FC,
+    Mean = mean,
+    FDR = fdr,
+    Pval = pval,
+    MeanDiff = meanDiff,
+    AUC = auc,
+    MeanBGD = meanBGD
+  )
+  # Write the data frame to a CSV file
+  write.csv(peak_data, "Peak_Matrix_Pairwise_Injured_vs_Uninjured.csv", row.names = FALSE)
+} else {
+  stop("The lengths of the extracted data do not match.")
+}
+```
+
+
+```{r}
+# Load libraries
+library(ChIPseeker)
+library(GenomicRanges)
+library(org.Mm.eg.db)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+# Load your data
+peak_data <- read.csv("Peak_Matrix_Pairwise_Injured_vs_Uninjured.csv")
+# Rename columns to avoid conflicts
+colnames(peak_data)[which(colnames(peak_data) %in% c("seqnames", "start", "end"))] <- c("chrom", "chromStart", "chromEnd")
+# Create a GRanges object
+gr <- GRanges(seqnames = Rle(peak_data$chrom),
+              ranges = IRanges(start = peak_data$chromStart, end = peak_data$chromEnd),
+              strand = Rle("*"),
+              peak_data[, -c(1:3)]) # Include all other columns
+# Annotate peaks
+txdb = TxDb.Mmusculus.UCSC.mm10.knownGene # Change to appropriate TxDb if needed
+peak_annotation = annotatePeak(gr, TxDb = txdb, annoDb = "org.Mm.eg.db")
+# Convert the annotation result to a data frame
+annotated_df = as.data.frame(peak_annotation)
+# Merge the annotation with the original peak data
+annotated_full_df <- cbind(peak_data, annotated_df[, !(colnames(annotated_df) %in% colnames(peak_data))])
+selected_columns <- c("chrom", "chromStart", "chromEnd","Log2FC", "Mean","FDR","Pval","AUC","MeanDiff","MeanBGD","width", "annotation", "geneLength", "distanceToTSS", "SYMBOL")
+final_df <- annotated_full_df[, selected_columns]
+# Save the annotated data to a new CSV file
+write.csv(final_df, "Peak_Matrix_Pairwise_Injured_vs_Uninjured_Annotated.csv",row.names = F)
+```
