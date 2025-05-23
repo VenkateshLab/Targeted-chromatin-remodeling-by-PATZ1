@@ -263,7 +263,7 @@ For questions or issues with the pipeline, please:
 - [TOBIAS Documentation](https://github.com/loosolab/TOBIAS)
 - [ArchR Documentation](https://www.archrproject.com/)
 - [Seurat Documentation](https://satijalab.org/seurat/)
-- [Snakemake Documentation](https://snakemake.readthedocs.io/)
+- [Homer](http://homer.ucsd.edu/homer/download.html)
 
 ---
 
